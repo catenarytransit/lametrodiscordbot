@@ -16,7 +16,7 @@ use std::time::Duration as StdDuration;
 use tokio::time;
 
 const STATE_FILE: &str = "alert_store.json";
-const CHECK_INTERVAL_SECONDS: u64 = 60;
+const CHECK_INTERVAL_SECONDS: u64 = 10;
 const CLEANUP_AGE_HOURS: i64 = 24;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
