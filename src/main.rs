@@ -138,7 +138,7 @@ async fn process_alerts(
             existing_state.hash = hash;
             existing_state.last_seen = now;
             for hook in &target_webhooks {
-                send_discord_webhook(client, hook, alert_id, alert, true).await;
+                send_discord_webhook(client, hook, alert_id, alert, &data.routes, &data.stops, true).await;
             }
         } else {
             // New alert
@@ -151,7 +151,7 @@ async fn process_alerts(
                 },
             );
             for hook in &target_webhooks {
-                send_discord_webhook(client, hook, alert_id, alert, false).await;
+                send_discord_webhook(client, hook, alert_id, alert, &data.routes, &data.stops, false).await;
             }
         }
     }
@@ -193,12 +193,66 @@ async fn send_discord_webhook(
     webhook_url: &str,
     alert_id: &str,
     alert: &AspenisedAlert,
+    routes: &HashMap<String, models::Route>,
+    stops: &HashMap<String, models::SerializableStop>,
     is_update: bool,
 ) {
-    let title = if is_update {
-        format!("🔄 Alert Updated: {}", alert_id)
+    let mut agency_name = None;
+    let mut route_short_name = None;
+    let mut stop_name = None;
+    let mut route_color = None;
+
+    for entity in &alert.informed_entity {
+        if let Some(rid) = &entity.route_id {
+            if let Some(route) = routes.get(rid) {
+                if agency_name.is_none() {
+                    agency_name = route.agency_id.clone();
+                }
+                if route_short_name.is_none() {
+                    route_short_name = route.short_name.clone();
+                }
+                if route_color.is_none() {
+                    route_color = route.color.clone();
+                }
+            }
+        }
+        if let Some(sid) = &entity.stop_id {
+            if let Some(stop) = stops.get(sid) {
+                if stop_name.is_none() {
+                    stop_name = stop.name.clone();
+                }
+            }
+        }
+        if let Some(aid) = &entity.agency_id {
+            if agency_name.is_none() {
+                agency_name = Some(aid.clone());
+            }
+        }
+    }
+
+    let mut info_parts = Vec::new();
+    if let Some(agency) = agency_name {
+        info_parts.push(agency);
+    }
+    if let Some(route) = route_short_name {
+        info_parts.push(route);
+    }
+    if let Some(stop) = stop_name {
+        info_parts.push(stop);
+    }
+
+    let info_text = info_parts.join(" / ");
+    
+    let title_text = if info_text.is_empty() {
+        "Alert".to_string()
     } else {
-        format!("🚨 New Alert: {}", alert_id)
+        format!("Alert {}", info_text)
+    };
+
+    let title = if is_update {
+        format!("🔄 Updated: {}", title_text)
+    } else {
+        title_text
     };
 
     let header = alert
@@ -221,6 +275,13 @@ async fn send_discord_webhook(
         .and_then(|t| t.translation.first())
         .map(|t| t.text.clone());
 
+    let color_int = if let Some(hex_color) = route_color {
+        let clean_hex = hex_color.trim_start_matches('#');
+        u32::from_str_radix(clean_hex, 16).unwrap_or(if is_update { 0xFFA500 } else { 0xFF0000 })
+    } else {
+        if is_update { 0xFFA500 } else { 0xFF0000 }
+    };
+
     let mut embed = json!({
         "title": title,
         "description": header, // Using header as main description for visibility
@@ -231,9 +292,9 @@ async fn send_discord_webhook(
                 "inline": false
             }
         ],
-        "color": if is_update { 0xFFA500 } else { 0xFF0000 }, // Orange for update, Red for new
+        "color": color_int,
         "footer": {
-            "text": format!("Alert ID: {}", alert_id)
+            "text": format!("Catenary Maps • Alert ID: {}", alert_id)
         },
         "timestamp": Utc::now().to_rfc3339()
     });
