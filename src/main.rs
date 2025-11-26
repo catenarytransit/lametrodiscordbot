@@ -32,6 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
 
     let webhook_url = env::var("DISCORD_WEBHOOK_URL").expect("DISCORD_WEBHOOK_URL must be set");
+    let bus_webhook_url = env::var("DISCORD_BUS_WEBHOOK_URL").expect("DISCORD_BUS_WEBHOOK_URL must be set");
 
     let urls = vec![
         "https://birch.catenarymaps.org/fetchalertsofchateau/?chateau=metrolinktrains",
@@ -51,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         for url in &urls {
             match fetch_alerts(&client, url).await {
                 Ok(response) => {
-                    process_alerts(&client, &webhook_url, &mut state, response).await;
+                    process_alerts(&client, &webhook_url, &bus_webhook_url, &mut state, response).await;
                 }
                 Err(e) => eprintln!("Error fetching from {}: {}", url, e),
             }
@@ -74,10 +75,11 @@ async fn fetch_alerts(client: &Client, url: &str) -> Result<AlertsResponse, reqw
 async fn process_alerts(
     client: &Client,
     webhook_url: &str,
+    bus_webhook_url: &str,
     state: &mut StateStore,
     data: AlertsResponse,
 ) {
-    for (alert_id, alert) in data.alerts {
+    for (alert_id, alert) in &data.alerts {
         // Create a canonical representation for hashing
         // We use serde_json::to_string to get a consistent string representation of the alert content
         let content_string = serde_json::to_string(&alert).unwrap_or_default();
@@ -88,8 +90,44 @@ async fn process_alerts(
 
         let now = Utc::now();
 
+        // Determine if it's a bus alert
+        let mut is_bus = false;
+        let mut is_rail = false;
+
+        for entity in &alert.informed_entity {
+            if let Some(route_type) = entity.route_type {
+                if route_type == 3 {
+                    is_bus = true;
+                } else {
+                    is_rail = true;
+                }
+            } else if let Some(route_id) = &entity.route_id {
+                if let Some(route) = data.routes.get(route_id) {
+                    if route.route_type == 3 {
+                        is_bus = true;
+                    } else {
+                        is_rail = true;
+                    }
+                }
+            }
+        }
+
+        // Default to rail if unknown, or if it affects both (send to both? User said separate, usually implies exclusive or both if mixed. Let's send to relevant hooks.)
+        // If no specific type found, default to rail (main webhook).
+        if !is_bus && !is_rail {
+            is_rail = true;
+        }
+
+        let target_webhooks = if is_bus && is_rail {
+            vec![webhook_url, bus_webhook_url]
+        } else if is_bus {
+            vec![bus_webhook_url]
+        } else {
+            vec![webhook_url]
+        };
+
         // Check if we've seen this alert ID before
-        if let Some(existing_state) = state.get_mut(&alert_id) {
+        if let Some(existing_state) = state.get_mut(alert_id) {
             if existing_state.hash == hash {
                 // Same content, just update last_seen
                 existing_state.last_seen = now;
@@ -99,7 +137,9 @@ async fn process_alerts(
             println!("Alert {} changed. Sending notification.", alert_id);
             existing_state.hash = hash;
             existing_state.last_seen = now;
-            send_discord_webhook(client, webhook_url, &alert_id, &alert, true).await;
+            for hook in &target_webhooks {
+                send_discord_webhook(client, hook, alert_id, alert, true).await;
+            }
         } else {
             // New alert
             println!("New alert {} detected. Sending notification.", alert_id);
@@ -110,7 +150,9 @@ async fn process_alerts(
                     last_seen: now,
                 },
             );
-            send_discord_webhook(client, webhook_url, &alert_id, &alert, false).await;
+            for hook in &target_webhooks {
+                send_discord_webhook(client, hook, alert_id, alert, false).await;
+            }
         }
     }
 }
