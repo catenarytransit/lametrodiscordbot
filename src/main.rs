@@ -38,6 +38,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         env::var("DISCORD_BUS_WEBHOOK_URL").expect("DISCORD_BUS_WEBHOOK_URL must be set");
     let accessibility_webhook_url = env::var("DISCORD_ACCESSIBILITY_WEBHOOK_URL")
         .expect("DISCORD_ACCESSIBILITY_WEBHOOK_URL must be set");
+    let mainline_webhook_url =
+        env::var("DISCORD_MAINLINE_WEBHOOK_URL").expect("DISCORD_MAINLINE_WEBHOOK_URL must be set");
 
     let urls = vec![
         "https://birch.catenarymaps.org/fetchalertsofchateau/?chateau=metrolinktrains",
@@ -55,12 +57,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         println!("Checking for alerts...");
         for url in &urls {
+            let (current_webhook_url, current_bus_webhook_url) = if url.contains("metrolink") {
+                (&mainline_webhook_url, &mainline_webhook_url)
+            } else {
+                (&webhook_url, &bus_webhook_url)
+            };
+
             match fetch_alerts(&client, url).await {
                 Ok(response) => {
                     process_alerts(
                         &client,
-                        &webhook_url,
-                        &bus_webhook_url,
+                        current_webhook_url,
+                        current_bus_webhook_url,
                         &accessibility_webhook_url,
                         &mut state,
                         response,
