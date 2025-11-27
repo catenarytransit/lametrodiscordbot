@@ -1,6 +1,7 @@
 mod models;
 
 use chrono::{DateTime, TimeZone, Utc};
+use chrono_tz::America::Los_Angeles;
 use dotenv::dotenv;
 use models::{AlertsResponse, AspenisedAlert};
 use regex::Regex;
@@ -385,13 +386,27 @@ async fn send_discord_webhook(
             let start_str = period
                 .start
                 .and_then(|s| Utc.timestamp_opt(s as i64, 0).single())
-                .map(|dt| format!("{} (<t:{}:R>)", dt.format("%Y-%m-%d %H:%M"), dt.timestamp()))
+                .map(|dt| {
+                    let la_time = dt.with_timezone(&Los_Angeles);
+                    format!(
+                        "{} (<t:{}:R>)",
+                        la_time.format("%Y-%m-%d %H:%M"),
+                        dt.timestamp()
+                    )
+                })
                 .unwrap_or_else(|| "Start".to_string());
 
             let end_str = period
                 .end
                 .and_then(|s| Utc.timestamp_opt(s as i64, 0).single())
-                .map(|dt| format!("{} (<t:{}:R>)", dt.format("%Y-%m-%d %H:%M"), dt.timestamp()))
+                .map(|dt| {
+                    let la_time = dt.with_timezone(&Los_Angeles);
+                    format!(
+                        "{} (<t:{}:R>)",
+                        la_time.format("%Y-%m-%d %H:%M"),
+                        dt.timestamp()
+                    )
+                })
                 .unwrap_or_else(|| "Indefinitely".to_string());
 
             description.push_str(&format!("\n• {} - {}", start_str, end_str));

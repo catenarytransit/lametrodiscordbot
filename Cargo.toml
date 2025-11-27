@@ -14,4 +14,5 @@ hex = "0.4"
 dotenv = "0.15"
 diesel = { version = "2.1.0", features = ["postgres", "chrono"] }
 regex = "1"
+chrono-tz = "0.8"
 
