@@ -474,6 +474,10 @@ fn is_multi_sentence(text: &str) -> bool {
     let departure_regex = Regex::new(r"\(\s*\d{1,2}:\d{2}\s+(?i)departure\s*\)").unwrap();
     let cleaned_text = departure_regex.replace_all(text, "");
 
+    // Handle (Departs: 19:40) or (Departs 22:30)
+    let departs_regex = Regex::new(r"\(\s*(?i)departs?:?\s*\d{1,2}:\d{2}\s*\)").unwrap();
+    let cleaned_text = departs_regex.replace_all(&cleaned_text, "");
+
     // 2. Handle common abbreviations that end in dot, to prevent false splitting
     // L.A. -> LA
     let la_regex = Regex::new(r"(?i)l\.a\.").unwrap();
@@ -510,10 +514,12 @@ mod tests {
             "Train 320 to San Bernardino-Downtown will use track 3B at L.A. Union Station for today. (11:40 departure)",
             "Train 352 to San Bernardino Downtown will use track 5B at Union Station today (Departs: 19:40).",
             "Train 628 to Irvine will use track 1 at Santa Ana today.",
+            "Train 139 to Moorpark will use track 5B at Union Station today (Departs 22:30).",
         ];
 
         for ex in examples {
             assert!(regex.is_match(ex), "Failed to match: {}", ex);
+            assert!(!is_multi_sentence(ex), "Detected as multi-sentence: {}", ex);
         }
     }
 }
