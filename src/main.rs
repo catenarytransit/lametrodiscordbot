@@ -501,6 +501,7 @@ mod tests {
             "Train 622 to Laguna Niguel / Mission Viejo will use track 13B in Los Angeles. (15:40 Departure)",
             "Train 320 to San Bernardino-Downtown will use track 3B at L.A. Union Station for today. (11:40 departure)",
             "Train 352 to San Bernardino Downtown will use track 5B at Union Station today (Departs: 19:40).",
+            "Train 628 to Irvine will use track 1 at Santa Ana today.",
         ];
 
         for ex in examples {
