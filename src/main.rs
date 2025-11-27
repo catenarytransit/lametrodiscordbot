@@ -1,6 +1,6 @@
 mod models;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use dotenv::dotenv;
 use models::{AlertsResponse, AspenisedAlert};
 use reqwest::Client;
@@ -32,7 +32,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
 
     let webhook_url = env::var("DISCORD_WEBHOOK_URL").expect("DISCORD_WEBHOOK_URL must be set");
-    let bus_webhook_url = env::var("DISCORD_BUS_WEBHOOK_URL").expect("DISCORD_BUS_WEBHOOK_URL must be set");
+    let bus_webhook_url =
+        env::var("DISCORD_BUS_WEBHOOK_URL").expect("DISCORD_BUS_WEBHOOK_URL must be set");
+    let accessibility_webhook_url = env::var("DISCORD_ACCESSIBILITY_WEBHOOK_URL")
+        .expect("DISCORD_ACCESSIBILITY_WEBHOOK_URL must be set");
 
     let urls = vec![
         "https://birch.catenarymaps.org/fetchalertsofchateau/?chateau=metrolinktrains",
@@ -52,7 +55,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         for url in &urls {
             match fetch_alerts(&client, url).await {
                 Ok(response) => {
-                    process_alerts(&client, &webhook_url, &bus_webhook_url, &mut state, response).await;
+                    process_alerts(
+                        &client,
+                        &webhook_url,
+                        &bus_webhook_url,
+                        &accessibility_webhook_url,
+                        &mut state,
+                        response,
+                    )
+                    .await;
                 }
                 Err(e) => eprintln!("Error fetching from {}: {}", url, e),
             }
@@ -76,6 +87,7 @@ async fn process_alerts(
     client: &Client,
     webhook_url: &str,
     bus_webhook_url: &str,
+    accessibility_webhook_url: &str,
     state: &mut StateStore,
     data: AlertsResponse,
 ) {
@@ -118,7 +130,29 @@ async fn process_alerts(
             is_rail = true;
         }
 
-        let target_webhooks = if is_bus && is_rail {
+        // Check for accessibility keywords
+        let header_text = alert
+            .header_text
+            .as_ref()
+            .and_then(|t| t.translation.first())
+            .map(|t| t.text.to_lowercase())
+            .unwrap_or_default();
+
+        let description_text = alert
+            .description_text
+            .as_ref()
+            .and_then(|t| t.translation.first())
+            .map(|t| t.text.to_lowercase())
+            .unwrap_or_default();
+
+        let is_accessibility = header_text.contains("elevator")
+            || header_text.contains("escalator")
+            || description_text.contains("elevator")
+            || description_text.contains("escalator");
+
+        let target_webhooks = if is_accessibility {
+            vec![accessibility_webhook_url]
+        } else if is_bus && is_rail {
             vec![webhook_url, bus_webhook_url]
         } else if is_bus {
             vec![bus_webhook_url]
@@ -138,7 +172,16 @@ async fn process_alerts(
             existing_state.hash = hash;
             existing_state.last_seen = now;
             for hook in &target_webhooks {
-                send_discord_webhook(client, hook, alert_id, alert, &data.routes, &data.stops, true).await;
+                send_discord_webhook(
+                    client,
+                    hook,
+                    alert_id,
+                    alert,
+                    &data.routes,
+                    &data.stops,
+                    true,
+                )
+                .await;
             }
         } else {
             // New alert
@@ -151,7 +194,16 @@ async fn process_alerts(
                 },
             );
             for hook in &target_webhooks {
-                send_discord_webhook(client, hook, alert_id, alert, &data.routes, &data.stops, false).await;
+                send_discord_webhook(
+                    client,
+                    hook,
+                    alert_id,
+                    alert,
+                    &data.routes,
+                    &data.stops,
+                    false,
+                )
+                .await;
             }
         }
     }
@@ -242,7 +294,7 @@ async fn send_discord_webhook(
     }
 
     let info_text = info_parts.join(" / ");
-    
+
     let title_text = if info_text.is_empty() {
         "Alert".to_string()
     } else {
@@ -262,12 +314,31 @@ async fn send_discord_webhook(
         .map(|t| t.text.clone())
         .unwrap_or_else(|| "No Header".to_string());
 
-    let description = alert
+    let mut description = alert
         .description_text
         .as_ref()
         .and_then(|t| t.translation.first())
         .map(|t| t.text.clone())
         .unwrap_or_else(|| "No Description".to_string());
+
+    if !alert.active_period.is_empty() {
+        description.push_str("\n\n**Active Periods:**");
+        for period in &alert.active_period {
+            let start_str = period
+                .start
+                .and_then(|s| Utc.timestamp_opt(s as i64, 0).single())
+                .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                .unwrap_or_else(|| "Start".to_string());
+
+            let end_str = period
+                .end
+                .and_then(|s| Utc.timestamp_opt(s as i64, 0).single())
+                .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                .unwrap_or_else(|| "Indefinitely".to_string());
+
+            description.push_str(&format!("\n• {} - {}", start_str, end_str));
+        }
+    }
 
     let url = alert
         .url
