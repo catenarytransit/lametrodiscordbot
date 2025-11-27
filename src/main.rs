@@ -85,6 +85,10 @@ async fn fetch_alerts(client: &Client, url: &str) -> Result<AlertsResponse, reqw
     resp.json::<AlertsResponse>().await
 }
 
+fn get_track_usage_regex() -> Regex {
+    Regex::new(r"(?i)Train\s+\d+\s+to\s+.*?\s+will\s+use\s+track\s+\w+\s+(?:at|in)\s+.*").unwrap()
+}
+
 async fn process_alerts(
     client: &Client,
     webhook_url: &str,
@@ -93,16 +97,13 @@ async fn process_alerts(
     state: &mut StateStore,
     data: AlertsResponse,
 ) {
-    // Regex to match "Train ... will use track ..."
     // Examples:
     // Train 410 to Riverside – Downtown will use track 2 at Montebello / Commerce.
     // Train 215 to Lancaster will use track 1 at Vincent Grade/ Acton.
     // Train 340 to San Bernardino – Downtown will use track 10A in Los Angeles. ( 16:40 Departure)
     // Train 622 to Laguna Niguel / Mission Viejo will use track 13B in Los Angeles. (15:40 Departure)
     // Train 320 to San Bernardino-Downtown will use track 3B at L.A. Union Station for today. (11:40 departure)
-    let track_usage_regex =
-        Regex::new(r"(?i)Train\s+\d+\s+to\s+.*?\s+will\s+use\s+track\s+\w+\s+(?:at|in)\s+.*")
-            .unwrap();
+    let track_usage_regex = get_track_usage_regex();
 
     // Keywords that indicate the alert is important and should NOT be filtered even if it matches the regex
     let important_keywords = [
@@ -121,6 +122,8 @@ async fn process_alerts(
         "issues",
         "train congestion",
         "alternative",
+        "incident",
+        "service disruption",
     ];
 
     for (alert_id, alert) in &data.alerts {
@@ -480,4 +483,28 @@ fn is_multi_sentence(text: &str) -> bool {
     }
 
     sentence_count > 1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_track_moves() {
+        let regex = get_track_usage_regex();
+        let examples = vec![
+            "Train 352 to San Bernardino Downtown will use track 5B at Union Station today (Departs: 19:40).",
+            "Train 356 to San Bernardino Downtown will use track 11B at Union Station today (Departs: 20:40).",
+            "Train 628 to Irvine will use track 14B at L.A. Union Station. (18:40 Departure)",
+            "Train 215 to Lancaster will use track 1 at Vincent Grade/ Acton.",
+            "Train 340 to San Bernardino – Downtown will use track 10A in Los Angeles. ( 16:40 Departure)",
+            "Train 622 to Laguna Niguel / Mission Viejo will use track 13B in Los Angeles. (15:40 Departure)",
+            "Train 320 to San Bernardino-Downtown will use track 3B at L.A. Union Station for today. (11:40 departure)",
+            "Train 352 to San Bernardino Downtown will use track 5B at Union Station today (Departs: 19:40).",
+        ];
+
+        for ex in examples {
+            assert!(regex.is_match(ex), "Failed to match: {}", ex);
+        }
+    }
 }
