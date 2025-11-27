@@ -3,6 +3,7 @@ mod models;
 use chrono::{DateTime, TimeZone, Utc};
 use dotenv::dotenv;
 use models::{AlertsResponse, AspenisedAlert};
+use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -91,6 +92,36 @@ async fn process_alerts(
     state: &mut StateStore,
     data: AlertsResponse,
 ) {
+    // Regex to match "Train ... will use track ..."
+    // Examples:
+    // Train 410 to Riverside – Downtown will use track 2 at Montebello / Commerce.
+    // Train 215 to Lancaster will use track 1 at Vincent Grade/ Acton.
+    // Train 340 to San Bernardino – Downtown will use track 10A in Los Angeles. ( 16:40 Departure)
+    // Train 622 to Laguna Niguel / Mission Viejo will use track 13B in Los Angeles. (15:40 Departure)
+    // Train 320 to San Bernardino-Downtown will use track 3B at L.A. Union Station for today. (11:40 departure)
+    let track_usage_regex =
+        Regex::new(r"(?i)Train\s+\d+\s+to\s+.*?\s+will\s+use\s+track\s+\w+\s+(?:at|in)\s+.*")
+            .unwrap();
+
+    // Keywords that indicate the alert is important and should NOT be filtered even if it matches the regex
+    let important_keywords = [
+        "delay",
+        "cancel",
+        "police",
+        "medical",
+        "emergency",
+        "bustitution",
+        "shuttle",
+        "rain",
+        "weather",
+        "snow",
+        "ice",
+        "mechanical",
+        "issues",
+        "train congestion",
+        "alternative",
+    ];
+
     for (alert_id, alert) in &data.alerts {
         // Create a canonical representation for hashing
         // We use serde_json::to_string to get a consistent string representation of the alert content
@@ -144,6 +175,33 @@ async fn process_alerts(
             .and_then(|t| t.translation.first())
             .map(|t| t.text.to_lowercase())
             .unwrap_or_default();
+
+        // Check if we should filter this alert
+        let full_text = format!("{} {}", header_text, description_text);
+
+        // Use the longer of the two texts for sentence analysis to avoid issues with concatenation
+        let text_to_analyze = if description_text.len() >= header_text.len() {
+            &description_text
+        } else {
+            &header_text
+        };
+
+        // If it matches the track usage pattern AND does not contain any important keywords
+        if track_usage_regex.is_match(&header_text) || track_usage_regex.is_match(&description_text)
+        {
+            let is_important = important_keywords.iter().any(|&k| full_text.contains(k));
+
+            if !is_important {
+                // Check if it's just a single sentence (ignoring departure times)
+                if !is_multi_sentence(text_to_analyze) {
+                    println!(
+                        "Filtering out track usage alert (single sentence): {}",
+                        alert_id
+                    );
+                    continue;
+                }
+            }
+        }
 
         let is_accessibility = header_text.contains("elevator")
             || header_text.contains("escalator")
@@ -383,4 +441,28 @@ async fn send_discord_webhook(
     } else {
         println!("Sent webhook for {}", alert_id);
     }
+}
+
+fn is_multi_sentence(text: &str) -> bool {
+    // 1. Remove departure time parentheticals: ( 16:40 Departure) or (10:40 departure)
+    let departure_regex = Regex::new(r"\(\s*\d{1,2}:\d{2}\s+(?i)departure\s*\)").unwrap();
+    let cleaned_text = departure_regex.replace_all(text, "");
+
+    // 2. Handle common abbreviations that end in dot, to prevent false splitting
+    // L.A. -> LA
+    let la_regex = Regex::new(r"(?i)l\.a\.").unwrap();
+    let no_abbr_text = la_regex.replace_all(&cleaned_text, "LA");
+
+    // 3. Split by sentence delimiters (. ! ?)
+    // We look for a delimiter followed by whitespace or end of string
+    let sentence_split_regex = Regex::new(r"[.!?]+(\s+|$)").unwrap();
+
+    let mut sentence_count = 0;
+    for segment in sentence_split_regex.split(&no_abbr_text) {
+        if segment.trim().len() > 0 {
+            sentence_count += 1;
+        }
+    }
+
+    sentence_count > 1
 }
