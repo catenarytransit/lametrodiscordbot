@@ -327,13 +327,13 @@ async fn send_discord_webhook(
             let start_str = period
                 .start
                 .and_then(|s| Utc.timestamp_opt(s as i64, 0).single())
-                .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                .map(|dt| format!("{} (<t:{}:R>)", dt.format("%Y-%m-%d %H:%M"), dt.timestamp()))
                 .unwrap_or_else(|| "Start".to_string());
 
             let end_str = period
                 .end
                 .and_then(|s| Utc.timestamp_opt(s as i64, 0).single())
-                .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                .map(|dt| format!("{} (<t:{}:R>)", dt.format("%Y-%m-%d %H:%M"), dt.timestamp()))
                 .unwrap_or_else(|| "Indefinitely".to_string());
 
             description.push_str(&format!("\n• {} - {}", start_str, end_str));
