@@ -40,6 +40,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("DISCORD_ACCESSIBILITY_WEBHOOK_URL must be set");
     let mainline_webhook_url =
         env::var("DISCORD_MAINLINE_WEBHOOK_URL").expect("DISCORD_MAINLINE_WEBHOOK_URL must be set");
+    let track_webhook_url =
+        env::var("DISCORD_TRACK_WEBHOOK_URL").expect("DISCORD_TRACK_WEBHOOK_URL must be set");
 
     let urls = vec![
         "https://birch.catenarymaps.org/fetchalertsofchateau/?chateau=metrolinktrains",
@@ -70,6 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         current_webhook_url,
                         current_bus_webhook_url,
                         &accessibility_webhook_url,
+                        &track_webhook_url,
                         &mut state,
                         response,
                     )
@@ -102,6 +105,7 @@ async fn process_alerts(
     webhook_url: &str,
     bus_webhook_url: &str,
     accessibility_webhook_url: &str,
+    track_webhook_url: &str,
     state: &mut StateStore,
     data: AlertsResponse,
 ) {
@@ -199,28 +203,28 @@ async fn process_alerts(
         };
 
         // If it matches the track usage pattern AND does not contain any important keywords
-        if track_usage_regex.is_match(&header_text) || track_usage_regex.is_match(&description_text)
+        // Check if this is a track usage alert that should go to the track webhook
+        let is_track_usage_only = if track_usage_regex.is_match(&header_text)
+            || track_usage_regex.is_match(&description_text)
         {
             let is_important = important_keywords.iter().any(|&k| full_text.contains(k));
-
-            if !is_important {
-                // Check if it's just a single sentence (ignoring departure times)
-                if !is_multi_sentence(text_to_analyze) {
-                    println!(
-                        "Filtering out track usage alert (single sentence): {}",
-                        alert_id
-                    );
-                    continue;
-                }
-            }
-        }
+            // It's a track-only alert if it matches the pattern, has no important keywords,
+            // and is just a single sentence
+            !is_important && !is_multi_sentence(text_to_analyze)
+        } else {
+            false
+        };
 
         let is_accessibility = header_text.contains("elevator")
             || header_text.contains("escalator")
             || description_text.contains("elevator")
             || description_text.contains("escalator");
 
-        let target_webhooks = if is_accessibility {
+        let target_webhooks = if is_track_usage_only {
+            // Track usage alerts go to the track webhook only
+            println!("Sending track usage alert to track webhook: {}", alert_id);
+            vec![track_webhook_url]
+        } else if is_accessibility {
             vec![accessibility_webhook_url]
         } else if is_bus && is_rail {
             vec![webhook_url, bus_webhook_url]
@@ -515,6 +519,7 @@ mod tests {
             "Train 352 to San Bernardino Downtown will use track 5B at Union Station today (Departs: 19:40).",
             "Train 628 to Irvine will use track 1 at Santa Ana today.",
             "Train 139 to Moorpark will use track 5B at Union Station today (Departs 22:30).",
+            "Update: Train 139 to Moorpark will use track 3B at Union Station today (Departs 22:30).",
         ];
 
         for ex in examples {
