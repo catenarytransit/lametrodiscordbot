@@ -118,25 +118,8 @@ async fn process_alerts(
     let track_usage_regex = get_track_usage_regex();
 
     // Keywords that indicate the alert is important and should NOT be filtered even if it matches the regex
-    let important_keywords = [
-        "delay",
-        "cancel",
-        "police",
-        "medical",
-        "emergency",
-        "bustitution",
-        "shuttle",
-        "rain",
-        "weather",
-        "snow",
-        "ice",
-        "mechanical",
-        "issues",
-        "train congestion",
-        "alternative",
-        "incident",
-        "service disruption",
-    ];
+    // We use \b to match word boundaries (start of word) to avoid matching "Train" with "rain" or "Service" with "ice"
+    let important_regex = Regex::new(r"(?i)\b(?:delay|cancel|police|medical|emergency|bustitution|shuttle|rain|weather|snow|ice|mechanical|issues|train congestion|alternative|incident|service disruption|collision|derailment)").unwrap();
 
     for (alert_id, alert) in &data.alerts {
         // Create a canonical representation for hashing
@@ -207,7 +190,7 @@ async fn process_alerts(
         let is_track_usage_only = if track_usage_regex.is_match(&header_text)
             || track_usage_regex.is_match(&description_text)
         {
-            let is_important = important_keywords.iter().any(|&k| full_text.contains(k));
+            let is_important = important_regex.is_match(&full_text);
             // It's a track-only alert if it matches the pattern, has no important keywords,
             // and is just a single sentence
             !is_important && !is_multi_sentence(text_to_analyze)
@@ -509,6 +492,8 @@ mod tests {
     fn test_track_moves() {
         let regex = get_track_usage_regex();
         let examples = vec![
+            "Train 740 to South Perris will use track 10B at Union Station today (Departs: 17:33).",
+            "Train 225 to Lancaster will use track 4B at Union Station today (Departs: 6:39 PM).",
             "Train 352 to San Bernardino Downtown will use track 5B at Union Station today (Departs: 19:40).",
             "Train 356 to San Bernardino Downtown will use track 11B at Union Station today (Departs: 20:40).",
             "Train 628 to Irvine will use track 14B at L.A. Union Station. (18:40 Departure)",
@@ -522,9 +507,16 @@ mod tests {
             "Update: Train 139 to Moorpark will use track 3B at Union Station today (Departs 22:30).",
         ];
 
+        let important_regex = Regex::new(r"(?i)\b(?:delay|cancel|police|medical|emergency|bustitution|shuttle|rain|weather|snow|ice|mechanical|issues|train congestion|alternative|incident|service disruption|collision|derailment)").unwrap();
+
         for ex in examples {
-            assert!(regex.is_match(ex), "Failed to match: {}", ex);
-            assert!(!is_multi_sentence(ex), "Detected as multi-sentence: {}", ex);
+            let is_match = regex.is_match(ex);
+            let is_multi = is_multi_sentence(ex);
+            let is_important = important_regex.is_match(ex);
+
+            assert!(is_match, "Failed to match: {}", ex);
+            assert!(!is_multi, "Detected as multi-sentence: {}", ex);
+            assert!(!is_important, "Detected as important: {}", ex);
         }
     }
 }
