@@ -46,6 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let urls = vec![
         "https://birch.catenarymaps.org/fetchalertsofchateau/?chateau=metrolinktrains",
         "https://birch.catenarymaps.org/fetchalertsofchateau/?chateau=metro~losangeles",
+        "https://birch.catenarymaps.org/fetchalertsofchateau/?chateau=amtrak",
     ];
 
     let client = Client::new();
@@ -66,7 +67,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             match fetch_alerts(&client, url).await {
-                Ok(response) => {
+                Ok(mut response) => {
+                    filter_alerts(url, &mut response);
                     process_alerts(
                         &client,
                         current_webhook_url,
@@ -94,6 +96,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn fetch_alerts(client: &Client, url: &str) -> Result<AlertsResponse, reqwest::Error> {
     let resp = client.get(url).send().await?;
     resp.json::<AlertsResponse>().await
+}
+
+fn filter_alerts(url: &str, data: &mut AlertsResponse) {
+    if url.contains("amtrak") {
+        data.alerts.retain(|_, alert| {
+            // Check if any informed entity points to a "Pacific Surfliner" route
+            alert.informed_entity.iter().any(|entity| {
+                if let Some(route_id) = &entity.route_id {
+                    if let Some(route) = data.routes.get(route_id) {
+                        if let Some(long_name) = &route.long_name {
+                            return long_name == "Pacific Surfliner";
+                        }
+                    }
+                }
+                false
+            })
+        });
+    }
 }
 
 fn get_track_usage_regex() -> Regex {
