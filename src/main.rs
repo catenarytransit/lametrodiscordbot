@@ -60,11 +60,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         println!("Checking for alerts...");
         for url in &urls {
-            let (current_webhook_url, current_bus_webhook_url) = if url.contains("metrolink") {
-                (&mainline_webhook_url, &mainline_webhook_url)
-            } else {
-                (&webhook_url, &bus_webhook_url)
-            };
+            let (current_webhook_url, current_bus_webhook_url) =
+                if url.contains("metrolink") || url.contains("amtrak") {
+                    (&mainline_webhook_url, &mainline_webhook_url)
+                } else {
+                    (&webhook_url, &bus_webhook_url)
+                };
 
             match fetch_alerts(&client, url).await {
                 Ok(mut response) => {
