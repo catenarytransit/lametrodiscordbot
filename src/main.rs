@@ -100,6 +100,34 @@ async fn fetch_alerts(client: &Client, url: &str) -> Result<AlertsResponse, reqw
 }
 
 fn filter_alerts(url: &str, data: &mut AlertsResponse) {
+    data.alerts.retain(|_, alert| {
+        let header = alert
+            .header_text
+            .as_ref()
+            .and_then(|t| t.translation.first())
+            .map(|t| t.text.as_str())
+            .unwrap_or("");
+        let desc = alert
+            .description_text
+            .as_ref()
+            .and_then(|t| t.translation.first())
+            .map(|t| t.text.as_str())
+            .unwrap_or("");
+        let alert_url = alert
+            .url
+            .as_ref()
+            .and_then(|t| t.translation.first())
+            .map(|t| t.text.as_str())
+            .unwrap_or("");
+
+        let full_text_lower = format!("{} {} {}", header, desc, alert_url).to_lowercase();
+        let full_text_exact = format!("{} {} {}", header, desc, alert_url);
+
+        !full_text_lower.contains("uber voucher")
+            && !full_text_lower.contains("r.uber.com")
+            && !full_text_exact.contains("IS EXPERIENCING A SIGNIFICANT DELAY")
+    });
+
     if url.contains("amtrak") {
         data.alerts.retain(|_, alert| {
             // Check if any informed entity points to a "Pacific Surfliner" route
