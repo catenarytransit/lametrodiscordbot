@@ -146,7 +146,7 @@ fn filter_alerts(url: &str, data: &mut AlertsResponse) {
 }
 
 fn get_track_usage_regex() -> Regex {
-    Regex::new(r"(?i)Train\s+\d+\s+to\s+.*?\s+will\s+use\s+track\s+\w+\s+(?:at|in)\s+.*").unwrap()
+    Regex::new(r"(?i)(?:Train|METROLINK)\s+\d+\s+to\s+.*?\s+will\s+use\s+track\s+\w+(?:\s+(?:at|in|for)\s+.*)?").unwrap()
 }
 
 async fn process_alerts(
@@ -554,6 +554,7 @@ mod tests {
             "Train 628 to Irvine will use track 1 at Santa Ana today.",
             "Train 139 to Moorpark will use track 5B at Union Station today (Departs 22:30).",
             "Update: Train 139 to Moorpark will use track 3B at Union Station today (Departs 22:30).",
+            "METROLINK 231 TO LANCASTER WILL USE TRACK 1 FOR TODAY",
         ];
 
         let important_regex = Regex::new(r"(?i)\b(?:delay|cancel|police|medical|emergency|bustitution|shuttle|rain|weather|snow|ice|mechanical|issues|train congestion|alternative|incident|service disruption|collision|derailment)").unwrap();
